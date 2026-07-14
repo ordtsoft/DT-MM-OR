@@ -1,0 +1,29 @@
+{
+  "rel_annotations": [
+    [
+      "mps",
+      "CloseTo",
+      "mps_station"
+    ],
+    [
+      "head_surgeon",
+      "Touching",
+      "patient"
+    ],
+    [
+      "nurse",
+      "CloseTo",
+      "instrument_table"
+    ],
+    [
+      "assistant_surgeon",
+      "CloseTo",
+      "instrument_table"
+    ],
+    [
+      "anest",
+      "CloseTo",
+      "patient"
+    ]
+  ]
+}

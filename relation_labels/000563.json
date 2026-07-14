@@ -1,0 +1,1 @@
+{"rel_annotations":[["assistant_surgeon","CloseTo","patient"],["circulator","CloseTo","patient"],["circulator","CloseTo","instrument_table"],["nurse","Preparing","instrument_table"],["mps","CloseTo","instrument_table"],["mps","Holding","instrument"],["anest","CloseTo","patient"]]}

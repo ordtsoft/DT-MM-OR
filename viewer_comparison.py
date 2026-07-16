@@ -39,6 +39,16 @@ ALGORITHM_STYLES = {
 Point = tuple[float, float]
 
 
+def blend_with_white(color: str, amount: float = 0.65) -> str:
+    """Return a lighter version of a #RRGGBB color for secondary marks."""
+    red, green, blue = (int(color[index:index + 2], 16) for index in (1, 3, 5))
+    channels = [
+        round(channel + (255 - channel) * amount)
+        for channel in (red, green, blue)
+    ]
+    return "#" + "".join(f"{channel:02x}" for channel in channels)
+
+
 class Predictor:
     def predict(self, frame: int) -> Point | None:
         raise NotImplementedError
@@ -389,11 +399,22 @@ class ComparisonViewer(tk.Tk):
         ttk.Button(controls, text="−", width=3, command=lambda: self.zoom_by(0.8)).pack(side="left", padx=(10, 1))
         ttk.Button(controls, text="100%", width=6, command=self.reset_zoom).pack(side="left", padx=1)
         ttk.Button(controls, text="+", width=3, command=lambda: self.zoom_by(1.25)).pack(side="left", padx=(1, 5))
+        ttk.Label(controls, text="Plot:").pack(side="left", padx=(8, 3))
+        self.display_model_var = tk.StringVar(value="All models")
+        self.model_filter = ttk.Combobox(
+            controls,
+            textvariable=self.display_model_var,
+            values=("All models", *self.predictors),
+            state="readonly",
+            width=19,
+        )
+        self.model_filter.pack(side="left")
+        self.model_filter.bind("<<ComboboxSelected>>", lambda _event: self.draw())
         self.frame_var = tk.IntVar(value=1)
         self.slider = ttk.Scale(controls, from_=1, to=len(sequence.files), variable=self.frame_var,
                                 command=lambda _value: self.draw())
-        self.slider.pack(side="left", fill="x", expand=True, padx=12)
-        self.status = ttk.Label(controls, width=34, anchor="e")
+        self.slider.pack(side="left", fill="x", expand=True, padx=(8, 12))
+        self.status = ttk.Label(controls, width=28, anchor="e")
         self.status.pack(side="right")
 
         self.bind("<space>", lambda _event: self.toggle_play())
@@ -475,6 +496,12 @@ class ComparisonViewer(tk.Tk):
         self.view_center = full_x / 2, full_y / 2
         self.draw()
 
+    def displayed_predictors(self) -> list[str]:
+        selected = self.display_model_var.get()
+        if selected in self.predictors:
+            return [selected]
+        return list(self.predictors)
+
     def ensure_processed(self, index: int) -> None:
         """Make every prediction before revealing the corresponding observation."""
         while len(self.track) <= index:
@@ -520,6 +547,34 @@ class ComparisonViewer(tk.Tk):
         def visible(point: Point) -> bool:
             return x0 <= point[0] <= x1 and y0 <= point[1] <= y1
 
+        def draw_segmented_path(
+            points: list[Point | None],
+            color: str,
+            width: int,
+            dash: tuple[int, ...] = (),
+        ) -> None:
+            """Draw contiguous visible runs without bridging missing detections."""
+            segment: list[Point] = []
+
+            def flush() -> None:
+                if len(segment) > 1:
+                    screen_points = [screen(point) for point in segment]
+                    self.canvas.create_line(
+                        *sum(screen_points, ()),
+                        fill=color,
+                        width=width,
+                        dash=dash,
+                        smooth=True,
+                    )
+                segment.clear()
+
+            for point in points:
+                if point is None or not visible(point):
+                    flush()
+                else:
+                    segment.append(point)
+            flush()
+
         x_step, y_step = nice_step(x1 - x0), nice_step(y1 - y0)
         tick = math.ceil(x0 / x_step) * x_step
         while tick <= x1 + x_step * 1e-6:
@@ -540,34 +595,58 @@ class ComparisonViewer(tk.Tk):
                                 fill=AXIS, font=("Segoe UI Semibold", 9))
 
         start = max(0, self.index - self.trail + 1)
-        actual_path = [screen(point) for point in self.track[start:self.index + 1] if point and visible(point)]
-        if len(actual_path) > 1:
-            self.canvas.create_line(*sum(actual_path, ()), fill=ACTUAL_COLOR, width=4, smooth=True)
+        draw_segmented_path(self.track[start:self.index + 1], ACTUAL_COLOR, 4)
         current_actual = self.track[self.index]
         if current_actual and visible(current_actual):
             ax, ay = screen(current_actual)
             fill = COLOR_CLASSES[NAME_TO_RGB[self.entity]][1]
+            self.canvas.create_oval(
+                ax - 11, ay - 11, ax + 11, ay + 11,
+                fill=BACKGROUND, outline=BACKGROUND,
+            )
             self.canvas.create_oval(ax - 8, ay - 8, ax + 8, ay + 8, fill=fill, outline=ACTUAL_COLOR, width=3)
             self.canvas.create_text(ax + 13, ay, text=self.entity, anchor="w", fill=ACTUAL_COLOR,
                                     font=("Segoe UI Semibold", 9))
 
-        for name in self.predictors:
+        displayed_names = self.displayed_predictors()
+        for name in displayed_names:
             color, dash = ALGORITHM_STYLES[name]
-            predicted_path = [screen(point) for point in self.predictions[name][start:self.index + 1]
-                              if point and visible(point)]
+            faded_color = blend_with_white(color)
+            prediction_slice = self.predictions[name][start:self.index + 1]
             if self.prediction_dots_only:
-                for px, py in predicted_path:
-                    self.canvas.create_oval(px - 2.5, py - 2.5, px + 2.5, py + 2.5,
-                                            fill=color, outline=BACKGROUND, width=1)
-                if predicted_path:
-                    px, py = predicted_path[-1]
-                    self.canvas.create_oval(px - 4, py - 4, px + 4, py + 4,
-                                            fill=color, outline=BACKGROUND, width=1)
-            elif len(predicted_path) > 1:
-                self.canvas.create_line(*sum(predicted_path, ()), fill=color, width=2, dash=dash, smooth=True)
+                for point in prediction_slice[:-1]:
+                    if point and visible(point):
+                        px, py = screen(point)
+                        self.canvas.create_oval(
+                            px - 2.5, py - 2.5, px + 2.5, py + 2.5,
+                            fill=BACKGROUND, outline=faded_color, width=1,
+                        )
+            else:
+                draw_segmented_path(prediction_slice, faded_color, 2, dash)
+
+            current_prediction = self.predictions[name][self.index]
+            if current_prediction and visible(current_prediction):
+                px, py = screen(current_prediction)
+                if len(displayed_names) == 1 and current_actual and visible(current_actual):
+                    ax, ay = screen(current_actual)
+                    self.canvas.create_line(
+                        ax, ay, px, py,
+                        fill=faded_color, width=1, dash=(2, 3),
+                    )
+                self.canvas.create_oval(
+                    px - 7, py - 7, px + 7, py + 7,
+                    fill=BACKGROUND, outline=BACKGROUND, width=3,
+                )
+                self.canvas.create_oval(
+                    px - 5, py - 5, px + 5, py + 5,
+                    fill=BACKGROUND, outline=color, width=2,
+                )
+
             future_path = [screen(point) for point in self.forecasts[name][self.index] if visible(point)]
             origin = screen(current_actual) if current_actual and visible(current_actual) else (
-                predicted_path[-1] if predicted_path else None
+                screen(current_prediction)
+                if current_prediction and visible(current_prediction)
+                else None
             )
             if origin and future_path:
                 if not self.prediction_dots_only:
@@ -577,8 +656,13 @@ class ComparisonViewer(tk.Tk):
                     self.canvas.create_oval(px - 2.5, py - 2.5, px + 2.5, py + 2.5,
                                             fill=color, outline=BACKGROUND, width=1)
                 end_x, end_y = future_path[-1]
-                self.canvas.create_oval(end_x - 4, end_y - 4, end_x + 4, end_y + 4,
-                                        fill=color, outline=BACKGROUND, width=1)
+                self.canvas.create_polygon(
+                    end_x, end_y - 6,
+                    end_x + 6, end_y,
+                    end_x, end_y + 6,
+                    end_x - 6, end_y,
+                    fill=color, outline=BACKGROUND, width=2,
+                )
 
         self.draw_legend(left, 18)
         self.draw_metrics(left + plot_w + 18, top, panel_w)
@@ -588,7 +672,7 @@ class ComparisonViewer(tk.Tk):
 
     def draw_legend(self, x: float, y: float) -> None:
         items = [("actual", ACTUAL_COLOR, (), 4)] + [
-            (name, *ALGORITHM_STYLES[name], 2) for name in self.predictors
+            (name, *ALGORITHM_STYLES[name], 2) for name in self.displayed_predictors()
         ]
         for index, (name, color, dash, width) in enumerate(items):
             item_x = x + (index % 4) * 170
@@ -604,13 +688,18 @@ class ComparisonViewer(tk.Tk):
                                 fill="#17202a", font=("Segoe UI Semibold", 11))
         self.canvas.create_text(x, y + 22, anchor="nw", text="Each estimate precedes its observation",
                                 fill=AXIS, font=("Segoe UI", 8))
+        self.canvas.create_text(
+            x, y + 40, anchor="nw",
+            text="Ring: current prediction   Diamond: future target",
+            fill=AXIS, font=("Segoe UI", 8),
+        )
         ranking = []
         for name in self.predictors:
             values = [value for value in self.errors[name][:self.index + 1] if value is not None]
             mae = sum(values) / len(values) if values else math.inf
             rmse = math.sqrt(sum(value * value for value in values) / len(values)) if values else math.inf
             ranking.append((mae, name, rmse, values))
-        row_y = y + 58
+        row_y = y + 74
         for rank, (mae, name, rmse, values) in enumerate(sorted(ranking), 1):
             color = ALGORITHM_STYLES[name][0]
             self.canvas.create_text(x, row_y, anchor="nw", text=f"{rank}. {name}", fill=color,

@@ -27,6 +27,8 @@ class MultiFrameComparisonViewer(ComparisonViewer):
         self.predictions = {name: self.predictions[name] for name in VISIBLE_MODELS}
         self.errors = {name: self.errors[name] for name in VISIBLE_MODELS}
         self.forecasts = {name: self.forecasts[name] for name in VISIBLE_MODELS}
+        self.model_filter.configure(values=("All models", *self.predictors))
+        self.display_model_var.set("All models")
         self.scheduled_predictions: dict[str, dict[int, tuple[float, float]]] = {
             name: {} for name in self.predictors
         }

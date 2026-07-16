@@ -351,13 +351,12 @@ class AdaptiveEnsemblePredictor(Predictor):
 class ComparisonViewer(tk.Tk):
     def __init__(
         self, sequence: ShapeSequence, entity: str, interval_ms: int,
-        window: int, trail: int, horizon: int,
+        window: int,
     ) -> None:
         super().__init__()
         self.sequence, self.entity = sequence, entity
-        self.interval_ms, self.trail, self.horizon = interval_ms, trail, horizon
+        self.interval_ms = interval_ms
         self.prediction_steps = 1
-        self.prediction_dots_only = False
         self.playing = False
         self.after_id: str | None = None
         full_x = max(sequence.bounds[2], 0.1) * 1.06
@@ -376,7 +375,6 @@ class ComparisonViewer(tk.Tk):
         self.track: list[Point | None] = []
         self.predictions: dict[str, list[Point | None]] = {name: [] for name in self.predictors}
         self.errors: dict[str, list[float | None]] = {name: [] for name in self.predictors}
-        self.forecasts: dict[str, list[list[Point]]] = {name: [] for name in self.predictors}
         self.sample_counts: list[int] = []
         self.total_samples = 0
 
@@ -502,6 +500,10 @@ class ComparisonViewer(tk.Tk):
             return [selected]
         return list(self.predictors)
 
+    def displayed_prediction(self, name: str) -> Point | None:
+        """Return the prediction scored against the observation at this frame."""
+        return self.predictions[name][self.index]
+
     def ensure_processed(self, index: int) -> None:
         """Make every prediction before revealing the corresponding observation."""
         while len(self.track) <= index:
@@ -517,10 +519,6 @@ class ComparisonViewer(tk.Tk):
                 self.errors[name].append(math.dist(actual, predicted) if actual and predicted else None)
                 if actual:
                     predictor.update(frame, actual)
-                self.forecasts[name].append([
-                    point for future_frame in range(frame + 1, min(frame + self.horizon + 1, len(self.sequence.files)))
-                    if (point := predictor.predict(future_frame)) is not None
-                ])
             self.sample_counts.append(self.total_samples)
 
     def draw(self) -> None:
@@ -547,34 +545,6 @@ class ComparisonViewer(tk.Tk):
         def visible(point: Point) -> bool:
             return x0 <= point[0] <= x1 and y0 <= point[1] <= y1
 
-        def draw_segmented_path(
-            points: list[Point | None],
-            color: str,
-            width: int,
-            dash: tuple[int, ...] = (),
-        ) -> None:
-            """Draw contiguous visible runs without bridging missing detections."""
-            segment: list[Point] = []
-
-            def flush() -> None:
-                if len(segment) > 1:
-                    screen_points = [screen(point) for point in segment]
-                    self.canvas.create_line(
-                        *sum(screen_points, ()),
-                        fill=color,
-                        width=width,
-                        dash=dash,
-                        smooth=True,
-                    )
-                segment.clear()
-
-            for point in points:
-                if point is None or not visible(point):
-                    flush()
-                else:
-                    segment.append(point)
-            flush()
-
         x_step, y_step = nice_step(x1 - x0), nice_step(y1 - y0)
         tick = math.ceil(x0 / x_step) * x_step
         while tick <= x1 + x_step * 1e-6:
@@ -594,75 +564,34 @@ class ComparisonViewer(tk.Tk):
         self.canvas.create_text(left + plot_w - 8, top + 8, anchor="ne", text=f"zoom {self.zoom:.2f}×",
                                 fill=AXIS, font=("Segoe UI Semibold", 9))
 
-        start = max(0, self.index - self.trail + 1)
-        draw_segmented_path(self.track[start:self.index + 1], ACTUAL_COLOR, 4)
         current_actual = self.track[self.index]
+
+        displayed_names = self.displayed_predictors()
+        for name in displayed_names:
+            color, _dash = ALGORITHM_STYLES[name]
+            current_prediction = self.displayed_prediction(name)
+            if current_prediction and visible(current_prediction):
+                px, py = screen(current_prediction)
+                self.canvas.create_oval(
+                    px - 11, py - 11, px + 11, py + 11,
+                    fill=BACKGROUND, outline=BACKGROUND, width=3,
+                )
+                self.canvas.create_oval(
+                    px - 9, py - 9, px + 9, py + 9,
+                    fill=BACKGROUND, outline=color, width=3,
+                )
+
         if current_actual and visible(current_actual):
             ax, ay = screen(current_actual)
             fill = COLOR_CLASSES[NAME_TO_RGB[self.entity]][1]
             self.canvas.create_oval(
-                ax - 11, ay - 11, ax + 11, ay + 11,
+                ax - 9, ay - 9, ax + 9, ay + 9,
                 fill=BACKGROUND, outline=BACKGROUND,
             )
-            self.canvas.create_oval(ax - 8, ay - 8, ax + 8, ay + 8, fill=fill, outline=ACTUAL_COLOR, width=3)
-            self.canvas.create_text(ax + 13, ay, text=self.entity, anchor="w", fill=ACTUAL_COLOR,
+            self.canvas.create_oval(ax - 6, ay - 6, ax + 6, ay + 6,
+                                    fill=fill, outline=ACTUAL_COLOR, width=2)
+            self.canvas.create_text(ax + 11, ay, text=self.entity, anchor="w", fill=ACTUAL_COLOR,
                                     font=("Segoe UI Semibold", 9))
-
-        displayed_names = self.displayed_predictors()
-        for name in displayed_names:
-            color, dash = ALGORITHM_STYLES[name]
-            faded_color = blend_with_white(color)
-            prediction_slice = self.predictions[name][start:self.index + 1]
-            if self.prediction_dots_only:
-                for point in prediction_slice[:-1]:
-                    if point and visible(point):
-                        px, py = screen(point)
-                        self.canvas.create_oval(
-                            px - 2.5, py - 2.5, px + 2.5, py + 2.5,
-                            fill=BACKGROUND, outline=faded_color, width=1,
-                        )
-            else:
-                draw_segmented_path(prediction_slice, faded_color, 2, dash)
-
-            current_prediction = self.predictions[name][self.index]
-            if current_prediction and visible(current_prediction):
-                px, py = screen(current_prediction)
-                if len(displayed_names) == 1 and current_actual and visible(current_actual):
-                    ax, ay = screen(current_actual)
-                    self.canvas.create_line(
-                        ax, ay, px, py,
-                        fill=faded_color, width=1, dash=(2, 3),
-                    )
-                self.canvas.create_oval(
-                    px - 7, py - 7, px + 7, py + 7,
-                    fill=BACKGROUND, outline=BACKGROUND, width=3,
-                )
-                self.canvas.create_oval(
-                    px - 5, py - 5, px + 5, py + 5,
-                    fill=BACKGROUND, outline=color, width=2,
-                )
-
-            future_path = [screen(point) for point in self.forecasts[name][self.index] if visible(point)]
-            origin = screen(current_actual) if current_actual and visible(current_actual) else (
-                screen(current_prediction)
-                if current_prediction and visible(current_prediction)
-                else None
-            )
-            if origin and future_path:
-                if not self.prediction_dots_only:
-                    self.canvas.create_line(*(origin + sum(future_path, ())), fill=color, width=2, dash=dash)
-                spacing = 1 if self.prediction_dots_only else max(1, len(future_path) // 5)
-                for px, py in future_path[::spacing]:
-                    self.canvas.create_oval(px - 2.5, py - 2.5, px + 2.5, py + 2.5,
-                                            fill=color, outline=BACKGROUND, width=1)
-                end_x, end_y = future_path[-1]
-                self.canvas.create_polygon(
-                    end_x, end_y - 6,
-                    end_x + 6, end_y,
-                    end_x, end_y + 6,
-                    end_x - 6, end_y,
-                    fill=color, outline=BACKGROUND, width=2,
-                )
 
         self.draw_legend(left, 18)
         self.draw_metrics(left + plot_w + 18, top, panel_w)
@@ -671,14 +600,23 @@ class ComparisonViewer(tk.Tk):
                                    f"{self.sample_counts[self.index]} observations{source}")
 
     def draw_legend(self, x: float, y: float) -> None:
-        items = [("actual", ACTUAL_COLOR, (), 4)] + [
-            (name, *ALGORITHM_STYLES[name], 2) for name in self.displayed_predictors()
+        items = [("actual", ACTUAL_COLOR)] + [
+            (name, ALGORITHM_STYLES[name][0]) for name in self.displayed_predictors()
         ]
-        for index, (name, color, dash, width) in enumerate(items):
+        for index, (name, color) in enumerate(items):
             item_x = x + (index % 4) * 170
             item_y = y + (index // 4) * 17
-            self.canvas.create_line(item_x, item_y, item_x + 22, item_y,
-                                    fill=color, width=width, dash=dash)
+            if name == "actual":
+                self.canvas.create_oval(
+                    item_x + 6, item_y - 5, item_x + 16, item_y + 5,
+                    fill=COLOR_CLASSES[NAME_TO_RGB[self.entity]][1],
+                    outline=color, width=2,
+                )
+            else:
+                self.canvas.create_oval(
+                    item_x + 5, item_y - 6, item_x + 17, item_y + 6,
+                    fill=BACKGROUND, outline=color, width=2,
+                )
             self.canvas.create_text(item_x + 27, item_y, text=name, anchor="w", fill=color,
                                     font=("Segoe UI Semibold", 8))
 
@@ -690,7 +628,7 @@ class ComparisonViewer(tk.Tk):
                                 fill=AXIS, font=("Segoe UI", 8))
         self.canvas.create_text(
             x, y + 40, anchor="nw",
-            text="Ring: current prediction   Diamond: future target",
+            text="Colored ring: prediction for this frame",
             fill=AXIS, font=("Segoe UI", 8),
         )
         ranking = []
@@ -738,8 +676,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--entity", choices=sorted(NAME_TO_RGB), default="circulator",
                         help="single entity evaluated by all predictors")
     parser.add_argument("--window", type=int, default=45, help="rolling-regression observations")
-    parser.add_argument("--trail", type=int, default=80, help="past frames displayed")
-    parser.add_argument("--horizon", type=int, default=20, help="future frames forecast")
     parser.add_argument("--interval", type=int, default=100, help="animation interval in milliseconds")
     return parser.parse_args()
 
@@ -752,7 +688,7 @@ def main() -> None:
     try:
         sequence = ShapeSequence(directory, args.pattern)
         viewer = ComparisonViewer(sequence, args.entity, max(args.interval, 10),
-                                  max(args.window, 2), max(args.trail, 2), max(args.horizon, 1))
+                                  max(args.window, 2))
     except (FileNotFoundError, ValueError, shapefile.ShapefileException) as exc:
         raise SystemExit(str(exc)) from exc
     viewer.mainloop()

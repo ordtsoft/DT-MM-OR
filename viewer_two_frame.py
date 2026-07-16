@@ -51,12 +51,6 @@ class TwoFrameComparisonViewer(ComparisonViewer):
                     future_prediction = predictor.predict(target_frame)
                     if future_prediction is not None:
                         self.scheduled_predictions[name][target_frame] = future_prediction
-
-                self.forecasts[name].append([
-                    point for future_frame in range(frame + 1,
-                    min(frame + self.horizon + 1, len(self.sequence.files)))
-                    if (point := predictor.predict(future_frame)) is not None
-                ])
             self.sample_counts.append(self.total_samples)
 
 
@@ -68,8 +62,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--entity", choices=sorted(NAME_TO_RGB), default="circulator",
                         help="single entity evaluated by all predictors")
     parser.add_argument("--window", type=int, default=45, help="rolling-regression observations")
-    parser.add_argument("--trail", type=int, default=80, help="past frames displayed")
-    parser.add_argument("--horizon", type=int, default=20, help="future frames displayed")
     parser.add_argument("--interval", type=int, default=100, help="animation interval in milliseconds")
     return parser.parse_args()
 
@@ -83,7 +75,7 @@ def main() -> None:
         sequence = ShapeSequence(directory, args.pattern)
         viewer = TwoFrameComparisonViewer(
             sequence, args.entity, max(args.interval, 10),
-            max(args.window, 2), max(args.trail, 2), max(args.horizon, PREDICTION_STEPS),
+            max(args.window, 2),
         )
     except (FileNotFoundError, ValueError, shapefile.ShapefileException) as exc:
         raise SystemExit(str(exc)) from exc

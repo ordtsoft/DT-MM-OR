@@ -17,16 +17,14 @@ VISIBLE_MODELS = ("Persistence", "Online neural net", "Adaptive ensemble")
 
 
 class MultiFrameComparisonViewer(ComparisonViewer):
-    """Show one prediction dot per target frame for three selected models."""
+    """Show the current target-frame prediction for three selected models."""
 
     def __init__(self, *args, prediction_steps: int, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.prediction_steps = prediction_steps
-        self.prediction_dots_only = True
         self.predictors = {name: self.predictors[name] for name in VISIBLE_MODELS}
         self.predictions = {name: self.predictions[name] for name in VISIBLE_MODELS}
         self.errors = {name: self.errors[name] for name in VISIBLE_MODELS}
-        self.forecasts = {name: self.forecasts[name] for name in VISIBLE_MODELS}
         self.model_filter.configure(values=("All models", *self.predictors))
         self.display_model_var.set("All models")
         self.scheduled_predictions: dict[str, dict[int, tuple[float, float]]] = {
@@ -57,9 +55,6 @@ class MultiFrameComparisonViewer(ComparisonViewer):
                 target_prediction = predictor.predict(target) if target < len(self.sequence.files) else None
                 if target_prediction is not None:
                     self.scheduled_predictions[name][target] = target_prediction
-
-                # Only one future dot: the currently scheduled target frame.
-                self.forecasts[name].append([target_prediction] if target_prediction else [])
             self.sample_counts.append(self.total_samples)
 
 
@@ -73,7 +68,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--steps", type=int, default=DEFAULT_STEPS,
                         help="number of frames ahead to predict (default: 10)")
     parser.add_argument("--window", type=int, default=45, help="regression window inherited by the viewer")
-    parser.add_argument("--trail", type=int, default=60, help="past target frames displayed")
     parser.add_argument("--interval", type=int, default=100, help="animation interval in milliseconds")
     return parser.parse_args()
 
@@ -88,7 +82,7 @@ def main() -> None:
         sequence = ShapeSequence(directory, args.pattern)
         viewer = MultiFrameComparisonViewer(
             sequence, args.entity, max(args.interval, 10),
-            max(args.window, 2), max(args.trail, 2), steps,
+            max(args.window, 2),
             prediction_steps=steps,
         )
     except (FileNotFoundError, ValueError, shapefile.ShapefileException) as exc:

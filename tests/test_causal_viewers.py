@@ -48,6 +48,32 @@ class FakeStringVar:
         return self.value
 
 
+class FakeIntVar:
+    def __init__(self, value: int) -> None:
+        self.value = value
+
+    def get(self) -> int:
+        return self.value
+
+
+def test_prediction_for_current_frame_is_selected_for_display() -> None:
+    viewer = object.__new__(ComparisonViewer)
+    viewer.frame_var = FakeIntVar(1)
+    viewer.sequence = FakeSequence([(0.0, 0.0)])
+    viewer.predictions = {"model": [(1.0, 1.0)]}
+
+    assert viewer.displayed_prediction("model") == (1.0, 1.0)
+
+
+def test_missing_current_prediction_has_no_display_marker() -> None:
+    viewer = object.__new__(ComparisonViewer)
+    viewer.frame_var = FakeIntVar(1)
+    viewer.sequence = FakeSequence([(0.0, 0.0)])
+    viewer.predictions = {"model": [None]}
+
+    assert viewer.displayed_prediction("model") is None
+
+
 def configure_viewer(viewer: ComparisonViewer, track: list[Point | None]) -> RecordingPredictor:
     predictor = RecordingPredictor()
     viewer.sequence = FakeSequence(track)
@@ -57,7 +83,6 @@ def configure_viewer(viewer: ComparisonViewer, track: list[Point | None]) -> Rec
     viewer.track = []
     viewer.predictions = {"recorder": []}
     viewer.errors = {"recorder": []}
-    viewer.forecasts = {"recorder": []}
     viewer.sample_counts = []
     viewer.total_samples = 0
     return predictor

@@ -109,11 +109,12 @@ seven cold-start, causal algorithms on exactly the same observations:
 python viewer_comparison.py
 ```
 
-The actual track is black and each algorithm has a distinct colored dashed
-track and forecast. Use the **Plot** selector to isolate one model when tracks
-overlap. Past predictions are muted, a ring marks the current scored prediction,
-and a diamond marks the future forecast target. When one model is selected, a
-light dashed line shows its current prediction error. Use the mouse wheel over
+Only the entity's actual position for the selected frame is shown; the black
+trajectory trail is hidden. Each algorithm is represented by one colored ring
+at its prediction for that same frame. The prediction was made before that
+frame's observation arrived, so it is exactly the value used by the current
+error metric. Use the **Plot** selector to isolate one model when rings overlap.
+Use the mouse wheel over
 the plot for cursor-centered zoom, or use the `−`, `100%`, and `+` buttons.
 
 A live side panel ranks the methods by one-step mean absolute error and also
@@ -149,10 +150,10 @@ adaptive ensemble.
 python viewer_multi_frame.py
 ```
 
-The black line is the actual track. Model outputs are individual colored dots,
-one per predicted target frame; there are no predicted-path lines or arrows.
-The larger future dot is the prediction currently scheduled for ten frames
-ahead. Change the horizon when needed:
+The selected frame shows its actual position and one colored prediction ring
+per model. Each displayed prediction was frozen ten frames earlier and is the
+value currently being scored. There are no trajectory trails, future markers,
+predicted-path lines, or arrows. Change the horizon when needed:
 
 ```powershell
 python viewer_multi_frame.py --steps 20
